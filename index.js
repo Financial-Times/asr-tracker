@@ -5,6 +5,7 @@ var bodyParser = require('body-parser');
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
+var CMDB = require("cmdb.js");
 var authS3O = require('s3o-middleware');
 app.use(authS3O);
 
@@ -18,8 +19,10 @@ app.set('views', __dirname + '/views');
 
 /** Environment variables **/
 var port = process.env.PORT || 3001;
-var cmdbEndpoint = process.env.CMDB_ENDPOINT || 'https://cmdb.ft.com/v2/items/system';
-var apikey = process.env.APIKEY || 'changeme';
+var cmdb = new CMDB({
+	api: process.env.CMDBAPI,
+	apikey: process.env.APIKEY,
+});
 
 /**
  * Serves the form for submitting details
@@ -35,34 +38,23 @@ app.get('/', function (req, res) {
 app.post('/', function (req, res) {
 	var dateSubmitted = new Date();
 	var systemCode = req.body.systemCode;
-
+	var body = {
+		"lastReviewed": dateSubmitted.toISOString(),
+	};
 	if (!systemCode) {
 		res.status(400);
 		res.render("error", {message: "No System Code Provided"});
 		return;
 	}
-	request({
-		url: cmdbEndpoint + '/'+systemCode,
-		method: 'PUT',
-		json: true,
-		headers: {
-			'APIKEY': apikey,
-			'FT-Forwarded-Auth': "ad:"+ res.locals.s3o_username,
-		},
-		body: {
-			"lastReviewed": dateSubmitted.toISOString(),
-		},
-	}, function (error, response, body) {
-		if (error || response.statusCode != 200) {
-			res.status(502);
-			res.render("error", {message: "Problem connecting to CMDB"});
-			return;
-		}
+	cmdb.putItem(res.locals, 'system', systemCode, body).then(function (result) {
 		res.render('success', {
 			systemCode: systemCode,
 			username: res.locals.s3o_username,
 			date: dateSubmitted.toISOString(),
 		});
+	}).catch(function (error) {
+		res.status(502);
+		res.render("error", {message: "Problem connecting to CMDB ("+error+")"});
 	});
 });
 
@@ -78,3 +70,4 @@ app.use(function(err, req, res, next) {
 app.listen(port, function () {
   console.log('App listening on port '+port);
 });
+
